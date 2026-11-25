@@ -1,0 +1,39 @@
+# Generated simulation data
+/results/
+/build/
+/outputs/
+*.vvp
+*.vcd
+*.fst
+*.csv
+*.log
+*.jsonl
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# Reports, office documents, presentations and illustrations
+/report/
+/reports/
+/presentation/
+/figures/
+*.doc
+*.docx
+*.pdf
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.zip
+*.png
+*.jpg
+*.jpeg
+*.svg
+# Local settings and credentials
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

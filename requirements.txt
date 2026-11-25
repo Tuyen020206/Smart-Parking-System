@@ -1,0 +1,2 @@
+# Python >=3.10; simulation scripts use only the standard library.
+# External tools: Icarus Verilog (iverilog + vvp). Optional viewer: GTKWave.
