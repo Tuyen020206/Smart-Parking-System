@@ -1,0 +1,16 @@
+[*] View preset for the actual T10_auto_obstacle.vcd, timescale 1ps
+[timestart] 9355000000
+[size] 1200 750
+[sst_width] 250
+[signals_width] 280
+*-26.000000 9380500000  -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+@22
+tb_parking_top.blocked_async[3:0]
+tb_parking_top.dut.blocked[3:0]
+tb_parking_top.close_cmd[3:0]
+tb_parking_top.open_cmd[3:0]
+tb_parking_top.passage_pending[3:0]
+tb_parking_top.fifo_count[3:0]
+tb_parking_top.n_count[15:0]
+tb_parking_top.r_count[15:0]
+tb_parking_top.barrier_positions[31:0]

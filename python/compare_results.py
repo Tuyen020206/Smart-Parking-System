@@ -9,6 +9,8 @@ def audit():
     assert meta['state']=='COMPLETE',meta
     for name,wanted in meta['rtl_sha256'].items():
         assert hashlib.sha256((ROOT/Path(name.replace('\\','/'))).read_bytes()).hexdigest()==wanted,('RTL changed',name)
+    for name,wanted in meta.get('source_sha256',{}).items():
+        assert hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==wanted,('Tested source changed',name)
     summary=list(csv.DictReader((ROOT/'results/summary.csv').open(encoding='utf-8-sig')))
     checked=0
     for test in summary:

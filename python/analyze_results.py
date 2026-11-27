@@ -8,7 +8,7 @@ from run_tests import write_csv
 
 def rows(path):return list(csv.DictReader(path.open(encoding='utf-8-sig')))
 def analyze():
-    meta,summary=audit();assert meta['suite']=='all','Run the complete suite before regenerating analysis';metrics=[]
+    meta,summary=audit();assert meta['suite']=='all' and not meta.get('case_filter'),'Run the complete suite before regenerating analysis';metrics=[]
     for test in summary:
         if test['suite'] not in ('engine','top'):continue
         name=test['case'];directory=ROOT/'results/csv'/name
@@ -36,7 +36,7 @@ def analyze():
     for slots in [8,33,128]:
         for dedup in [16,32]:
             depth=8;pw=max(1,(depth-1).bit_length());cw=depth.bit_length();dcw=dedup.bit_length()
-            parts=dict(bitmap_bits=6*slots,owner_bits=48*slots,sensor_bits=272*slots,gate_bits=256*4,
+            parts=dict(bitmap_bits=6*slots,owner_bits=48*slots,sensor_bits=304*slots,gate_bits=365*4,
                        central_bits=275,dedup_entry_bits=145*dedup,source_history_bits=66*5,
                        memory_control_bits=96+dcw+1,fifo_payload_bits=256*depth,fifo_control_bits=2*pw+cw,
                        top_sync_bits=2*6*4,top_sequence_bits=32)
@@ -47,11 +47,12 @@ def analyze():
     baseline=[]
     for name in ['n8_f8_E13_fifo_full','n33_f3_E14_wrap','n128_f8_E25_random']:
         actual=rows(ROOT/'results/csv'/name/'actual.csv');previous=0;ring_writes=shift_writes=0
+        input_lines=(ROOT/'results/csv'/name/'vectors.txt').read_text().splitlines()
         for a in actual:
             flags=[int(a[k],16) for k in ['occupied','valid','reserved','maintenance','admitted','exit_pending']]
             size=int(name.split('_')[0][1:]);byte_flags=[[int(bool(mask&(1<<i))) for i in range(size)] for mask in flags]
             assert all(sum(v<<i for i,v in enumerate(arr))==mask for arr,mask in zip(byte_flags,flags))
-            inp=unpack(int((ROOT/'results/csv'/name/'vectors.txt').read_text().splitlines()[int(a['cycle'])].split()[0],16))
+            inp=unpack(int(input_lines[int(a['cycle'])].split()[0],16))
             count=int(a['fifo_count']);pop=int(a['event_valid_pre']) and inp['event_ready']
             push=count-previous+int(bool(pop))
             if inp['rst']:previous=0;continue
@@ -61,7 +62,32 @@ def analyze():
                              ring_payload_word_writes=ring_writes,shift_baseline_word_writes=shift_writes,
                              event_bits=256,assumption='shift on every pop; ring writes only on push'))
     write_csv(ROOT/'results/baseline.csv',baseline)
+    interlocks=[]
+    for name in ['T03_obstacle_fifo','T10_auto_obstacle']:
+        a=rows(ROOT/'results/csv'/name/'actual.csv')
+        raw=next(i for i,r in enumerate(a) if int(r['raw_blocked'],16)&1)
+        sync=next(i for i in range(raw,len(a)) if int(a[i]['blocked_sync'],16)&1)
+        masked=next(i for i in range(sync,len(a)) if not int(a[i]['close'],16)&1)
+        reopen=next(i for i in range(sync,len(a)) if int(a[i]['states'],16)&7==2)
+        interlocks.append(dict(case=name,raw_first_cycle=a[raw]['cycle'],sync_first_cycle=a[sync]['cycle'],
+            mask_cycle=a[masked]['cycle'],fsm_opening_cycle=a[reopen]['cycle'],raw_to_sync_intervals=sync-raw,
+            raw_to_sync_sampled_edges=sync-raw+1,sync_to_mask_intervals=masked-sync,sync_to_opening_intervals=reopen-sync,
+            tb_clock_hz=1000000,physical_mechanics_measured=False))
+        assert masked==sync and reopen-sync<=1,(name,'interlock latency')
+    write_csv(ROOT/'results/interlock.csv',interlocks)
+    grants=[]
+    for test in summary:
+        if test['suite']!='top':continue
+        a=rows(ROOT/'results/csv'/test['case']/'actual.csv')
+        for i,r in enumerate(a):
+            if r['rsp_valid']=='1' and r['rsp_status']=='0' and int(r['rsp_op']) in (0,5,7,11):
+                g=int(r['rsp_source'])
+                if g>=4:continue
+                opening=next((j for j in range(i,min(i+5,len(a))) if int(a[j]['open'],16)&(1<<g)),None)
+                grants.append(dict(case=test['case'],source=g,rsp_cycle=r['cycle'],open_cycle=a[opening]['cycle'] if opening is not None else '',
+                                   rsp_to_open_intervals=opening-i if opening is not None else '',note='No opening required after reset/FAULT' if opening is None else 'Measured post-edge samples'))
+    write_csv(ROOT/'results/grant_latency.csv',grants)
     (ROOT/'results/analysis.json').write_text(json.dumps(dict(passed=meta['passed'],cycles=meta['cycles'],checks=meta['checks'],
-          metrics=metrics,storage=storage,baseline=baseline),indent=2),encoding='utf-8')
+          metrics=metrics,storage=storage,baseline=baseline,interlocks=interlocks,grants=grants),indent=2),encoding='utf-8')
     print('Analysis complete. Memory is a declared-state estimate; no synthesis claim.')
 if __name__=='__main__':analyze()

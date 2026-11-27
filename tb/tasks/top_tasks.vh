@@ -3,6 +3,14 @@ task cycles;input integer k;integer i;begin for(i=0;i<k;i=i+1)tick;end endtask
 task milestone;input [255:0] name;begin
  $fdisplay(fm,"%0s,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",name,c_count,n_count,r_count,d_count,q_count,occupied,valid_map,reserved);
 end endtask
+task wait_gate_state;input integer g,value;integer w;begin
+ w=0;while(gate_states[g*3+:3]!=value)begin tick;w=w+1;if(w>1000)$fatal(1,"state wait gate%0d wanted%0d",g,value);end
+end endtask
+task automatic_entry;input integer g;begin
+ request_open(g);wait_gate_state(g,3);pass_barrier(g);
+ @(negedge clk);vehicle_async[g]=0;wait_gate_state(g,0);cycles(5);
+ if(!model_closed[g])$fatal(1,"plant not closed");
+end endtask
 task host_command;input [3:0] op;input [15:0] slot,data;input replay;integer wait_count;begin
  @(negedge clk);if(!replay)host_seq=host_seq+1;
  host_id={8'd4,epoch,host_seq[31:0]};host_op=op;host_slot=slot;host_data=data;host_valid=1;

@@ -10,6 +10,7 @@ module tb_gate;
  open_cmd,close_cmd,fault,state,assigned,session,pending,stop);
  integer testcase,fo,fm,cycle=0,accepts=0;reg [2047:0] path,marks,wave;
  reg [63:0] saved_id,pass_id;reg [15:0] saved_tag;
+ request_monitor guard_request(clk,rst,valid,ready,{req_id,req_op,req_slot,req_data,req_tag});
  `include "tasks/gate_tasks.vh"
  always @(posedge clk)begin
   if(!rst&&valid&&ready)accepts=accepts+1;
@@ -49,7 +50,7 @@ module tb_gate;
     milestone("delivered_once");if(accepts!=2)$fatal(1,"passage repeated");
    end
    5:begin
-    grant;opened_barrier;@(negedge clk);cancel=1;tick;
+    grant;opened_barrier;@(negedge clk);cancel=1;tick;while(!valid)tick;
     if(req_op!=2||!valid)$fatal(1,"cancel request");
     @(negedge clk);ready=1;pass_id=req_id;tick;@(negedge clk);ready=0;
     reply(0,saved_tag,pass_id,2);milestone("cancelled");expect_state(4);cycles(4);
@@ -60,9 +61,42 @@ module tb_gate;
    8:begin grant;@(negedge clk);rst=1;tick;milestone("reset_active");expect_state(5);end
    9:begin
     grant;opened_barrier;@(negedge clk);passage=1;cancel=1;tick;
-    milestone("passage_wins");if(!pending||req_op!=1)$fatal(1,"cancel over passage");
+    tick;milestone("passage_wins");if(!pending||req_op!=1)$fatal(1,"cancel over passage");
    end
    10:begin request_entry;cycles(85);milestone("authorization_timeout");expect_state(5);end
+   11:begin
+    grant;opened_barrier;@(negedge clk);clear=0;blocked=1;cancel=1;tick;
+    while(!valid)tick;
+    @(negedge clk);ready=1;pass_id=req_id;tick;@(negedge clk);ready=0;
+    reply(0,saved_tag,pass_id,2);expect_state(3);
+    @(negedge clk);blocked=0;clear=1;cycles(2);
+    milestone("cancel_closes_after_clear");expect_state(4);
+   end
+   12:begin
+    request_entry;reply(0,saved_tag,saved_id,15);milestone("wrong_opcode");expect_state(1);
+    reply(0,saved_tag,saved_id,0);expect_state(2);
+   end
+   13:begin
+    @(negedge clk);vehicle=1;tick;saved_id=req_id;saved_tag=req_tag;
+    cycles(85);expect_state(5);
+    if(!valid||req_id!=saved_id)$fatal(1,"stalled authorization lost on timeout");
+    milestone("timeout_holds_request");
+   end
+   14:begin
+    request_entry;cycles(85);expect_state(5);reply(0,saved_tag,saved_id,0);
+    if(assigned!=0||open_cmd)$fatal(1,"late grant must be recorded without opening");
+    @(negedge clk);cancel=1;vehicle=0;tick;while(!valid)tick;
+    @(negedge clk);ready=1;pass_id=req_id;tick;@(negedge clk);ready=0;
+    reply(0,saved_tag,pass_id,2);cycles(2);milestone("late_grant_cancelled");
+    if(accepts!=2)$fatal(1,"orphan allocation not cancelled");
+   end
+   15:begin
+    grant;opened_barrier;send_passage;while(!valid)tick;
+    @(negedge clk);ready=1;pass_id=req_id;tick;@(negedge clk);ready=0;closed=1;vehicle=0;tick;
+    @(negedge clk);vehicle=1;cycles(3);if(valid)$fatal(1,"new session before motion ACK");
+    milestone("motion_ack_wait");reply(0,saved_tag,pass_id,1);cycles(2);
+    if(!valid||req_op!=0)$fatal(1,"new session not resumed after ACK");
+   end
   endcase
   @(negedge clk);$fclose(fo);$fclose(fm);$display("PASS gate case=%0d cycles=%0d",testcase,cycle);$finish;
  end

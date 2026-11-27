@@ -1,9 +1,9 @@
 """Declarative expected milestones are independent of the gate implementation."""
 import csv,re
-from run_tests import write_csv
+from run_tests import write_csv,selected
 
 def verify_gate(tools,args,results):
-    binary=tools.compile('tb_gate','gate')
+    binary=None
     cases=[('G01_normal',[('granted',2,1,0,0),('passed',4,0,1,1),('closed',0,0,0,0)]),
            ('G02_denied',[('denied',0,0,0,0)]),
            ('G03_session_id',[('wrong_tag',1,0,0,0),('wrong_id',1,0,0,0),('correct',2,1,0,0)]),
@@ -13,13 +13,20 @@ def verify_gate(tools,args,results):
            ('G07_close_timeout',[('closing_timeout',5,0,0,1)]),
            ('G08_reset_active',[('reset_active',5,0,0,0)]),
            ('G09_simultaneous_cancel_pass',[('passage_wins',4,0,1,1)]),
-           ('G10_authorization_timeout',[('authorization_timeout',5,0,0,0)])]
+           ('G10_authorization_timeout',[('authorization_timeout',5,0,0,0)]),
+           ('G11_cancel_blocked',[('cancel_closes_after_clear',4,0,1,0)]),
+           ('G12_response_opcode',[('wrong_opcode',1,0,0,0)]),
+           ('G13_stalled_auth_timeout',[('timeout_holds_request',5,0,0,0)]),
+           ('G14_late_grant_cancel',[('late_grant_cancelled',0,0,0,0)]),
+           ('G15_motion_ack',[('motion_ack_wait',0,0,0,0)])]
     for index,(name,marks) in enumerate(cases,1):
+        if not selected(args,name):continue
+        if binary is None:binary=tools.compile('tb_gate','gate')
         directory=args.out/'csv'/name;directory.mkdir(parents=True,exist_ok=True)
         exp=[dict(zip(['milestone','state','open','close','pending'],row)) for row in [('recovered',0,0,0,0)]+marks]
         write_csv(directory/'expected.csv',exp)
         plus=dict(CASE=index,OUTPUT=directory/'actual.csv',MARKS=directory/'milestones.csv')
-        if index==4:plus['WAVE']=args.out/'vcd'/f'{name}.vcd'
+        if index in (4,11,13,14,15):plus['WAVE']=args.out/'vcd'/f'{name}.vcd'
         log=tools.simulate(binary,name,plus)
         actual=[{k:v if k=='milestone' else int(v) for k,v in row.items()} for row in csv.DictReader((directory/'milestones.csv').open())]
         assert actual==exp,(name,actual,exp)

@@ -23,4 +23,4 @@ task reply;input [7:0] status;input [15:0] tag_value;input [63:0] id_value;input
 end endtask
 task grant;begin request_entry;reply(0,saved_tag,saved_id,0);expect_state(2);end endtask
 task opened_barrier;begin @(negedge clk);closed=0;opened=1;tick;expect_state(3);end endtask
-task send_passage;begin @(negedge clk);passage=1;tick;@(negedge clk);passage=0;expect_state(4);end endtask
+task send_passage;begin @(negedge clk);passage=1;tick;@(negedge clk);passage=0;tick;expect_state(4);end endtask

@@ -4,7 +4,7 @@ The milestone list additionally verifies the complete physical Echo/gate route.
 """
 import csv
 from reference_model import Reference,LAYOUT,HEX
-from run_tests import write_csv
+from run_tests import write_csv,selected
 
 def unpack(value):
     result={}
@@ -13,7 +13,7 @@ def unpack(value):
     return result
 
 def verify_top(tools,args,results):
-    binary=tools.compile('tb_parking_top','top')
+    binary=None
     # Each tuple: milestone,C,N,R,D,Q,O_bitmap,valid_bitmap,reserved_bitmap.
     cases=[('T01_entry_park_exit',[('entered',8,1,0,0,0,0,255,1),('parked',8,1,0,0,0,1,255,0),
                                    ('left_slot',8,1,0,0,0,0,255,0),('exited',8,0,0,0,0,0,255,0)]),
@@ -25,12 +25,21 @@ def verify_top(tools,args,results):
            ('T05_booking',[('booked_entered',8,1,0,1,0,0,255,1),('booking_cancelled',8,1,0,0,0,0,255,1)]),
            ('T06_near_passages',[('three_entered',8,3,0,0,0,0,255,7)]),
            ('T07_reset_session',[('before_reset',8,0,1,0,0,0,255,1),('reset_locked',8,0,0,0,0,0,0,0,0)]),
-           ('T08_invalid_ticket',[('ticket_denied',8,0,0,0,0,0,255,0)])]
+           ('T08_invalid_ticket',[('ticket_denied',8,0,0,0,0,0,255,0)]),
+           ('T09_auto_entry_exit',[('entered',8,1,0,0,0,0,255,1),('parked',8,1,0,0,0,1,255,0),('left_slot',8,1,0,0,0,0,255,0),('exited',8,0,0,0,0,0,255,0)]),
+           ('T10_auto_obstacle',[('fifo_stalled',8,0,1,0,0,0,255,1),('obstacle',8,0,1,0,0,0,255,1),('event_recovered',8,1,0,0,0,0,255,1)]),
+           ('T11_opening_jam',[('opening_jammed',8,0,1,0,0,0,255,1)]),
+           ('T12_closing_jam',[('closing_jammed',8,1,0,0,0,0,255,1)]),
+           ('T13_cancel_obstacle',[('cancel_ack_held',8,0,0,0,0,0,255,0),('cancel_closed',8,0,0,0,0,0,255,0)])]
+    auto_binary=None
     for index,(name,marks) in enumerate(cases,1):
+        if not selected(args,name):continue
+        if index<=8 and binary is None:binary=tools.compile('tb_parking_top','top')
         directory=args.out/'csv'/name;directory.mkdir(parents=True,exist_ok=True)
         exp=[dict(zip(['milestone','c','n','r','d','q','occupied','valid','reserved'],row)) for row in [('ready',8,0,0,0,0,0,255,0)]+marks]
         write_csv(directory/'expected_milestones.csv',exp)
-        tools.simulate(binary,name,dict(CASE=index,OUTPUT=directory/'actual.csv',MARKS=directory/'milestones.csv',WAVE=args.out/'vcd'/f'{name}.vcd'))
+        if index>=9 and auto_binary is None:auto_binary=tools.compile('tb_parking_top','top_auto',dict(AUTO_BARRIER=1,GATE_LIMIT=200))
+        tools.simulate(auto_binary if index>=9 else binary,name,dict(CASE=index,OUTPUT=directory/'actual.csv',MARKS=directory/'milestones.csv',WAVE=args.out/'vcd'/f'{name}.vcd'))
         actual=[{k:v if k=='milestone' else int(v) for k,v in row.items()} for row in csv.DictReader((directory/'milestones.csv').open())]
         assert actual==exp,(name,actual,exp)
         ref=Reference(8,8,32);checks=0;expected_rows=[];cycles=0

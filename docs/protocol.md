@@ -49,3 +49,12 @@ Reset xóa SRAM và lịch sử. RAM không cung cấp chống replay xuyên m�
 Sensor hỗ trợ CLK_HZ là bội nguyên của 1 MHz, 50≤MIN_ECHO_US≤MAX_ECHO_US≤65535, D_ON<D_OFF, CONFIRM≥1. Demo đo 1 MHz, gap100µs, timeout3000µs, ngưỡng100/140mm. Mặc định RTL 50MHz, gap60000µs, timeout30000µs, ngưỡng1000/1200mm. Hai bộ tham số phục vụ hai mục đích khác nhau.
 
 Median dùng 5 bộ lưu16bit, sorting tổ hợp với vòng lặp hữu hạn. Ngưỡng tách hai hướng chuyển; CONFIRM=3, lần đầu nhận trạng thái cần 7 mẫu. Một mẫu lỗi xóa cửa sổ, báo UNKNOWN và đòi lấy lại mẫu hợp lệ. STALE_US mặc định 2×(GAP+MAX_ECHO+TRIGGER). Nếu đang giữ snapshot chờ ready, giữ payload ổn định; khi snapshot quá hạn được ACK, lập tức xếp UNKNOWN tiếp theo và xóa cửa sổ trước khi đo lại. Sensor ưu tiên làm cho command chưa thể chen vào giữa hai status này.
+
+
+## Quy tắc gate V2
+
+TX có117bit (valid1+ID64+op4+slot16+data16+tag16), giữ đến handshake cả khi timeout. auth_wait và motion_wait tách giao dịch đang chờ. Response phải khớp ID, tag và opcode. Gate không nhận phiên mới khi còn TX/ACK/suất chưa giải quyết. Late grant trong FAULT không mở; entry ghi nhận owns_grant để hủy có xác minh. Exit grant mồ côi cần đối soát thủ công; không tuyên bố tự phục hồi đầy đủ.
+
+cancel_done lưu ACKhủy trong lúc blocked/clear0; chỉ khi clear1&&!blocked mới đóng. Passage trước hủy cùng cạnh được ưu tiên; passage đến sau một cancel đã xác minh là mâu thuẫn môi trường và đưa FAULT. cancel_verified phải bảo đảm xe không tiếp tục qua; chưa có cơ chế an ninh xác minh nguồn.
+
+Sensor V2 đo số clock giữa cạnh Echo đã đồng bộ, tính floor((echo_clocks+1)/DIV), DIV=CLK_HZ/1e6. Timer timeout vẫn dùng tickµs. S11/S12 bổ sung clock50MHz, cạnh biên và ngưỡng. Khoảng304bit/node; gate365bit/node. Đây là số bit trạng thái chức năng khai báo, không là netlist sau synthesis.

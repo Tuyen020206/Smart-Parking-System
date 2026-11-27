@@ -24,10 +24,12 @@ module slot_node_sensor #(
  reg [31:0] distance_mm;reg candidate,last_candidate,candidate_valid;
  reg [15:0] confirm_count;reg fault_reported;
  reg [31:0] age_us;reg stale_pending;
+ reg [31:0] echo_clocks;
+ wire [31:0] measured_us=(echo_clocks+1'b1)/DIV;
  integer i,j;
  always @*begin
   for(i=0;i<4;i=i+1)sorted[i]=samples[i+1];
-  sorted[4]=width_us+1;
+  sorted[4]=measured_us;
   swap=0;
   for(i=0;i<5;i=i+1)for(j=0;j<4;j=j+1)begin
    if(j<4-i&&sorted[j]>sorted[j+1])begin swap=sorted[j];sorted[j]=sorted[j+1];sorted[j+1]=swap;end
@@ -42,7 +44,7 @@ module slot_node_sensor #(
   if(rst)begin
    phase<=GAP;divider<=0;timer_us<=0;width_us<=0;echo_prev<=0;
    known<=0;occupied<=0;status_valid<=0;echo_us<=0;median_mm<=0;sample_count<=0;
-   confirm_count<=0;last_candidate<=0;fault_reported<=0;sample_pulse<=0;timeout_pulse<=0;age_us<=0;stale_pending<=0;
+   confirm_count<=0;last_candidate<=0;fault_reported<=0;sample_pulse<=0;timeout_pulse<=0;age_us<=0;stale_pending<=0;echo_clocks<=0;
    for(k=0;k<5;k=k+1)samples[k]<=0;
   end else begin
    divider<=tick?0:divider+1'b1;echo_prev<=echo_sync;sample_pulse<=0;timeout_pulse<=0;
@@ -56,7 +58,7 @@ module slot_node_sensor #(
      if(timer_us>=TRIGGER_US-1)begin phase<=WAIT_RISE;timer_us<=0;end else timer_us<=timer_us+1'b1;
     end
     WAIT_RISE:begin
-     if(echo_sync&&!echo_prev)begin phase<=MEASURE;width_us<=0;timer_us<=0;end
+     if(echo_sync&&!echo_prev)begin phase<=MEASURE;width_us<=0;echo_clocks<=0;timer_us<=0;end
      else if(tick)begin
       if(timer_us>=MAX_ECHO_US-1)begin
        phase<=GAP;timer_us<=0;known<=0;sample_count<=0;confirm_count<=0;timeout_pulse<=1;
@@ -67,14 +69,14 @@ module slot_node_sensor #(
     end
     MEASURE:begin
      if(!echo_sync&&echo_prev)begin
-      phase<=GAP;timer_us<=0;echo_us<=width_us+1;
-      if(width_us+1<MIN_ECHO_US||width_us+1>MAX_ECHO_US)begin
+      phase<=GAP;timer_us<=0;echo_us<=measured_us;
+      if(measured_us<MIN_ECHO_US||measured_us>MAX_ECHO_US)begin
        known<=0;sample_count<=0;confirm_count<=0;timeout_pulse<=1;
        if(known||!fault_reported)status_valid<=1;fault_reported<=1;
        for(k=0;k<5;k=k+1)samples[k]<=0;
       end else begin
        sample_pulse<=1;fault_reported<=0;age_us<=0;stale_pending<=0;
-       for(k=0;k<4;k=k+1)samples[k]<=samples[k+1];samples[4]<=width_us+1;
+       for(k=0;k<4;k=k+1)samples[k]<=samples[k+1];samples[4]<=measured_us;
        if(sample_count<5)sample_count<=sample_count+1'b1;
        if(sample_count>=4)begin
         median_mm<=distance_mm;
@@ -91,12 +93,15 @@ module slot_node_sensor #(
         end else confirm_count<=0;
        end
       end
-     end else if(tick)begin
+     end else begin
+      echo_clocks<=echo_clocks+1'b1;
+      if(tick)begin
       if(width_us>=MAX_ECHO_US)begin
        phase<=GAP;timer_us<=0;known<=0;sample_count<=0;confirm_count<=0;timeout_pulse<=1;
        if(known||!fault_reported)status_valid<=1;fault_reported<=1;
        for(k=0;k<5;k=k+1)samples[k]<=0;
       end else width_us<=width_us+1'b1;
+      end
      end
     end
     default:phase<=GAP;

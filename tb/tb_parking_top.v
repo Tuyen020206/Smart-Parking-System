@@ -1,5 +1,6 @@
 `timescale 1ns/1ps
 module tb_parking_top;
+ parameter AUTO_BARRIER=0,GATE_LIMIT=100000;
  localparam SLOTS=8,FIFO_DEPTH=8,DEDUP=32;
  reg clk=0;always #500 clk=~clk;
  reg rst=1,run_enable=0;reg [23:0] epoch=1;
@@ -7,6 +8,7 @@ module tb_parking_top;
  reg [3:0] passage_async=0,blocked_async=0,clear_async=15,cancel_verified=0,recovery_confirm=0;
  reg [7:0] entry_mode=0;reg [63:0] exit_slot=0;
  reg [7:0] echo_async=0;wire [7:0] trigger;wire [23:0] led_rgb;
+ reg [3:0] jam=0;wire [3:0] model_open,model_closed;wire [31:0] barrier_positions;
  wire [3:0] open_cmd,close_cmd,fault,passage_pending,safety_stop;wire [11:0] gate_states;wire [63:0] assigned_slots;
  reg host_valid=0;wire host_ready;reg [63:0] host_id=0;reg [3:0] host_op=0;
  reg [15:0] host_slot=0,host_data=0,host_tag=0;integer host_seq=0;
@@ -19,15 +21,15 @@ module tb_parking_top;
  wire [31:0] dedup_hits,conflicts,stale_count;
  wire [7:0] sensor_known,sensor_occupied,sensor_status_pending;wire [127:0] sensor_echo_us,sensor_median_mm;
  parking_top #(.CLK_HZ(1000000),.SENSOR_GAP_US(100),.SENSOR_TIMEOUT_US(3000),
- .D_ON_MM(100),.D_OFF_MM(140),.CONFIRM(3),.GATE_TIMEOUT_CYCLES(100000)) dut(
+ .D_ON_MM(100),.D_OFF_MM(140),.CONFIRM(3),.GATE_TIMEOUT_CYCLES(GATE_LIMIT)) dut(
  .clk(clk),
  .rst(rst),
  .run_enable(run_enable),
  .epoch(epoch),
  .vehicle_async(vehicle_async),
  .ticket_ok(ticket_ok),
- .open_limit_async(open_limit_async),
- .close_limit_async(close_limit_async),
+ .open_limit_async(AUTO_BARRIER?model_open:open_limit_async),
+ .close_limit_async(AUTO_BARRIER?model_closed:close_limit_async),
  .passage_async(passage_async),
  .blocked_async(blocked_async),
  .clear_async(clear_async),
@@ -94,6 +96,13 @@ module tb_parking_top;
  .sensor_echo_us(sensor_echo_us),
  .sensor_median_mm(sensor_median_mm));
  integer widths[0:7];genvar g;
+ generate for(g=0;g<4;g=g+1)begin: plants
+  barrier_model #(12) plant(clk,rst,open_cmd[g],close_cmd[g],jam[g],model_open[g],model_closed[g],barrier_positions[g*8+:8]);
+ end endgenerate
+ generate for(g=0;g<5;g=g+1)begin: request_guards
+  request_monitor guard(clk,rst,dut.req_valid[g],dut.req_ready[g],
+   {dut.ids[g*64+:64],dut.ops[g*4+:4],dut.slots[g*16+:16],dut.datas[g*16+:16],dut.tags[g*16+:16]});
+ end endgenerate
  generate for(g=0;g<8;g=g+1)begin: echo_models
   integer width;
   always @(negedge trigger[g])if(!rst)begin
@@ -119,16 +128,16 @@ module tb_parking_top;
  {8'hfe,epoch,dut.sensor_sequence},event_ready,retire_valid,retire_source,retire_epoch,retire_seq};
   #2;check_invariants();
   if(!rst&&(close_cmd&dut.blocked)!=0)$fatal(1,"top unsafe close");
-   if(cycle>0)$fwrite(fo,"%0d,%h,%0d,%0d,%h,%0d,%h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%h,%h,%h,%h,%h,%h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%h,%h,%h,%h,%h,%h,%h,%h\n",
+   if(cycle>0)$fwrite(fo,"%0d,%h,%0d,%0d,%h,%0d,%h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%h,%h,%h,%h,%h,%h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%h,%h,%h,%h,%h,%h,%h,%h,%h,%h,%h,%h\n",
     cycle,pre_ready,pre_sensor_ready,pre_ev,pre_data,rsp_valid,rsp_id,rsp_op,rsp_source,rsp_status,rsp_slot,rsp_tag,
     c_count,n_count,r_count,d_count,q_count,available,online,overcommitted,occupied,valid_map,reserved,maintenance,admitted,
-    exit_pending,fifo_count,dedup_used,dedup_hits,conflicts,stale_count,retire_ok,commit_valid,commit_op,commit_id,pre_vector,gate_states,open_cmd,close_cmd,passage_pending,dut.blocked,blocked_async);
+    exit_pending,fifo_count,dedup_used,dedup_hits,conflicts,stale_count,retire_ok,commit_valid,commit_op,commit_id,pre_vector,gate_states,open_cmd,close_cmd,passage_pending,dut.blocked,blocked_async,barrier_positions,model_open,model_closed,jam);
   cycle=cycle+1;if(cycle>150000)$fatal(1,"top watchdog case %0d",testcase);
  end
  initial begin
   if(!$value$plusargs("CASE=%d",testcase)||!$value$plusargs("OUTPUT=%s",path)||!$value$plusargs("MARKS=%s",marks))$fatal;
   fo=$fopen(path,"w");fm=$fopen(marks,"w");
-  $fwrite(fo,"cycle,ready,sensor_ready,event_valid_pre,event_data_pre,rsp_valid,rsp_id,rsp_op,rsp_source,rsp_status,rsp_slot,rsp_tag,c,n,r,d,q,available,online,overcommitted,occupied,valid,reserved,maintenance,admitted,exit_pending,fifo_count,dedup_used,dedup_hits,conflicts,stale_count,retire_ok,commit_valid,commit_op,commit_id,input_vector,states,open,close,pending,blocked_sync,raw_blocked\n");
+  $fwrite(fo,"cycle,ready,sensor_ready,event_valid_pre,event_data_pre,rsp_valid,rsp_id,rsp_op,rsp_source,rsp_status,rsp_slot,rsp_tag,c,n,r,d,q,available,online,overcommitted,occupied,valid,reserved,maintenance,admitted,exit_pending,fifo_count,dedup_used,dedup_hits,conflicts,stale_count,retire_ok,commit_valid,commit_op,commit_id,input_vector,states,open,close,pending,blocked_sync,raw_blocked,barrier_pos,model_open,model_closed,jam\n");
   $fdisplay(fm,"milestone,c,n,r,d,q,occupied,valid,reserved");
   if($value$plusargs("WAVE=%s",wave))begin
    $dumpfile(wave);$dumpvars(1,tb_parking_top);$dumpvars(1,dut);
@@ -190,6 +199,37 @@ module tb_parking_top;
     @(negedge clk);ticket_ok[0]=0;vehicle_async[0]=1;cycles(20);
     if(open_cmd[0]||n_count!=0||r_count!=0)$fatal(1,"invalid ticket opened gate");
     milestone("ticket_denied");
+   end
+   9:begin
+    automatic_entry(0);milestone("entered");widths[0]=200;wait_occupied(0,1);milestone("parked");
+    widths[0]=1200;wait_occupied(0,0);milestone("left_slot");
+    exit_slot[48+:16]=0;automatic_entry(3);milestone("exited");
+   end
+   10:begin
+    request_open(0);wait_gate_state(0,3);
+    @(negedge clk);event_ready=0;for(j=0;j<8;j=j+1)host_command(15,0,j,0);
+    pass_barrier(0);cycles(2);
+    if(!passage_pending[0]||n_count!=0)$fatal(1,"auto FIFO lost event");milestone("fifo_stalled");
+    @(negedge clk);blocked_async[0]=1;cycles(4);
+    if(close_cmd[0]||!open_cmd[0])$fatal(1,"auto obstacle failed");milestone("obstacle");
+    cycles(12);@(negedge clk);blocked_async[0]=0;event_ready=1;vehicle_async[0]=0;
+    wait_gate_state(0,0);cycles(5);
+    if(n_count!=1||r_count!=0||!model_closed[0])$fatal(1,"auto reclose failed");milestone("event_recovered");
+   end
+   11:begin
+    jam[0]=1;request_open(0);wait_gate_state(0,5);
+    if(n_count!=0||r_count!=1||barrier_positions[7:0]!=0)$fatal(1,"opening jam counts");milestone("opening_jammed");
+   end
+   12:begin
+    request_open(0);wait_gate_state(0,3);jam[0]=1;pass_barrier(0);wait_gate_state(0,5);
+    if(n_count!=1||r_count!=0||close_cmd[0])$fatal(1,"closing jam counts");milestone("closing_jammed");
+   end
+   13:begin
+    request_open(0);wait_gate_state(0,3);
+    @(negedge clk);blocked_async[0]=1;clear_async[0]=0;cancel_verified[0]=1;vehicle_async[0]=0;cycles(12);
+    if(r_count!=0||close_cmd[0])$fatal(1,"cancel while blocked");milestone("cancel_ack_held");
+    @(negedge clk);blocked_async[0]=0;clear_async[0]=1;cancel_verified[0]=0;wait_gate_state(0,0);
+    if(n_count!=0||r_count!=0||!model_closed[0])$fatal(1,"cancel reclose failed");milestone("cancel_closed");
    end
   endcase
   cycles(8);@(negedge clk);$fclose(fo);$fclose(fm);$display("PASS top case=%0d cycles=%0d",testcase,cycle);$finish;

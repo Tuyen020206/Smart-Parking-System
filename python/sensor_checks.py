@@ -2,7 +2,7 @@
 from collections import deque
 from pathlib import Path
 import csv,re
-from run_tests import write_csv
+from run_tests import write_csv,selected
 
 def expected(widths,expire_after=None):
     window=deque(maxlen=5);known=occ=median=confirm=last=echo=0;rows=[]
@@ -28,7 +28,7 @@ def expected(widths,expire_after=None):
     return rows
 
 def verify_sensor(tools,args,results):
-    binary=tools.compile('tb_sensor','sensor')
+    binary=None;binary_50=None
     cases={
       'S01_cold_free':[1200]*9,
       'S02_free_occupied':[1200]*8+[200]*9,
@@ -39,8 +39,12 @@ def verify_sensor(tools,args,results):
       'S07_invalid_short':[1200]*8+[20]+[1200]*8,
       'S08_no_echo_cold':[0,0]+[1200]*7,
       'S09_status_backpressure':[1200]*10,
-      'S10_stale_backpressure':[1200]*10}
+      'S10_stale_backpressure':[1200]*10,
+      'S11_clock_50mhz':[1200]*8+[200]*8,
+      'S12_threshold_50mhz':[1200]*8+[584]*8+[700]*6+[817]*8}
     for name,widths in cases.items():
+        if not selected(args,name):continue
+        if binary is None:binary=tools.compile('tb_sensor','sensor')
         directory=args.out/'csv'/name;directory.mkdir(parents=True,exist_ok=True)
         inp=directory/'echo_widths.txt';out=directory/'actual.csv';inp.write_text('\n'.join(map(str,widths))+'\n')
         exp=expected(widths,7 if name=='S10_stale_backpressure' else None);write_csv(directory/'expected.csv',exp)
@@ -49,6 +53,9 @@ def verify_sensor(tools,args,results):
         if name in ('S09_status_backpressure','S10_stale_backpressure'):
             hold=2 if name=='S10_stale_backpressure' else 1
             selected_binary=tools.compile('tb_sensor',f'sensor_backpressure_{hold}',dict(HOLD_STATUS=hold))
+        elif name in ('S11_clock_50mhz','S12_threshold_50mhz'):
+            if binary_50 is None:binary_50=tools.compile('tb_sensor','sensor_50mhz',dict(CLK_RATE=50000000))
+            selected_binary=binary_50
         else:selected_binary=binary
         log=tools.simulate(selected_binary,name,plus)
         actual=[{k:int(v) for k,v in row.items()} for row in csv.DictReader(out.open())]
